@@ -3,6 +3,7 @@ import csv
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import Iterable, Optional
@@ -15,6 +16,8 @@ from sklearn.metrics import (
 from pycm import ConfusionMatrix
 import util.misc as misc
 import util.lr_sched as lr_sched
+from util.figdraw import plot_confusion_matrix, plot_binary_roc, plot_binary_pr # we added plot functions here
+from sklearn.metrics import roc_curve, auc
 
 def train_one_epoch(
     model: torch.nn.Module,
@@ -82,9 +85,9 @@ def train_one_epoch(
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 @torch.no_grad()
-def evaluate(data_loader, model, device, args, epoch, mode, num_class, log_writer):
-    """Evaluate the model."""
-    criterion = nn.CrossEntropyLoss()
+def evaluate(data_loader, model, device, args, epoch, mode, num_class, log_writer, criterion):
+    """Evaluate the model"""
+    criterion = criterion # nn.CrossEntropyLoss() # we changed the loss function to focal loss
     metric_logger = misc.MetricLogger(delimiter="  ")
     os.makedirs(os.path.join(args.output_dir, args.task), exist_ok=True)
     
@@ -98,7 +101,7 @@ def evaluate(data_loader, model, device, args, epoch, mode, num_class, log_write
         with torch.cuda.amp.autocast():
             output = model(images)
             loss = criterion(output, target)
-        output_ = nn.Softmax(dim=1)(output)
+        output_ = nn.Softmax(dim=1)(output)         # 转换为概率⭐
         output_label = output_.argmax(dim=1)
         output_onehot = F.one_hot(output_label.to(torch.int64), num_classes=num_class)
         
@@ -108,7 +111,7 @@ def evaluate(data_loader, model, device, args, epoch, mode, num_class, log_write
         true_labels.extend(target.cpu().numpy())
         pred_labels.extend(output_label.detach().cpu().numpy())
         pred_softmax.extend(output_.detach().cpu().numpy())
-    
+
     accuracy = accuracy_score(true_labels, pred_labels)
     hamming = hamming_loss(true_onehot, pred_onehot)
     jaccard = jaccard_score(true_onehot, pred_onehot, average='macro')
@@ -120,9 +123,9 @@ def evaluate(data_loader, model, device, args, epoch, mode, num_class, log_write
     recall = recall_score(true_onehot, pred_onehot, zero_division=0, average='macro')
     
     score = (f1 + roc_auc + kappa) / 3
-    if log_writer:
+    if log_writer: # TensorBoard
         for metric_name, value in zip(['accuracy', 'f1', 'roc_auc', 'hamming', 'jaccard', 'precision', 'recall', 'average_precision', 'kappa', 'score'],
-                                       [accuracy, f1, roc_auc, hamming, jaccard, precision, recall, average_precision, kappa, score]):
+                                      [accuracy, f1, roc_auc, hamming, jaccard, precision, recall, average_precision, kappa, score]):
             log_writer.add_scalar(f'perf/{metric_name}', value, epoch)
     
     print(f'val loss: {metric_logger.meters["loss"].global_avg}')
@@ -140,9 +143,40 @@ def evaluate(data_loader, model, device, args, epoch, mode, num_class, log_write
             wf.writerow(['val_loss', 'accuracy', 'f1', 'roc_auc', 'hamming', 'jaccard', 'precision', 'recall', 'average_precision', 'kappa'])
         wf.writerow([metric_logger.meters["loss"].global_avg, accuracy, f1, roc_auc, hamming, jaccard, precision, recall, average_precision, kappa])
     
+    # Generate publication-quality figures at the end, as in the original code
     if mode == 'test':
-        cm = ConfusionMatrix(actual_vector=true_labels, predict_vector=pred_labels)
-        cm.plot(cmap=plt.cm.Blues, number_label=True, normalized=True, plot_lib="matplotlib")
-        plt.savefig(os.path.join(args.output_dir, args.task, 'confusion_matrix_test.jpg'), dpi=600, bbox_inches='tight')
+        # Generate publication-quality figures
+        plot_confusion_matrix(
+            true_labels, pred_labels, 
+            output_dir=args.output_dir, 
+            task_name=args.task, 
+            mode=mode
+        )
+        # Generate ROC curves
+        if num_class == 2:
+            true_labels_arr = np.array(true_labels)         # shape: (N,)
+            pred_softmax_arr = np.array(pred_softmax)       # shape: (N,2)
+            pred_scores = pred_softmax_arr[:, 1]            # shape: (N,)
+
+            plot_binary_roc(
+                true_labels=true_labels_arr,
+                pred_scores=pred_scores,
+                output_dir=args.output_dir,
+                task_name=args.task,
+                mode=mode
+            )
+
+            plot_binary_pr(
+                true_labels=true_labels_arr,
+                pred_scores=pred_scores,
+                output_dir=args.output_dir,
+                task_name=args.task,
+                mode=mode
+            )
+        else:
+            print("Not a binary classification task, skip binary ROC and PR plotting.")
     
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}, score
+
+
+

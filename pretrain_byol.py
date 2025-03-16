@@ -32,7 +32,7 @@ def get_args_parser():
     parser.add_argument('--final_tau', default=0.999, type=float)
     # Dataset parameters
     parser.add_argument('--root', default="/mnt/d/3.dlProject/bdrv/data/pretraindata(crop)", type=str)
-    parser.add_argument('--save_dir', default="/mnt/d/3.dlProject/keyan/checkpoints", type=str)
+    parser.add_argument('--save_dir', default="/mnt/d/3.dlProject/keyan/byol-pretrain", type=str)
     # optimizer
     parser.add_argument('--base_lr', default=5e-4, type=float)
     parser.add_argument('--weight_decay', default=1e-4, type=float)
@@ -381,7 +381,7 @@ def main(args):
     )
     dataloader = DataLoader(
         dataset,
-        batch_size= args.batch_siza,
+        batch_size= args.batch_size,
         shuffle=True,
         num_workers=args.num_workers,
         pin_memory=True,

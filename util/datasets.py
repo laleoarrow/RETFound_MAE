@@ -8,7 +8,17 @@ from torchvision import datasets, transforms
 from timm.data import create_transform
 from timm.data.constants import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD
 
-
+# class ImageFolderWithPaths(datasets.ImageFolder):
+#     """
+#     继承自 ImageFolder，使得 __getitem__ 返回 (image, label, path) 三个值。
+#     """
+#     def __getitem__(self, index):
+#         # 原本是 (image, label)
+#         image, label = super().__getitem__(index)
+#         # 取出路径 (path, class_index)
+#         path = self.samples[index][0]  # 也可以用 self.imgs[index][0], 二者是别名
+#         return image, label, path
+    
 def build_dataset(is_train, args):
     transform = build_transform(is_train, args)
     root = os.path.join(args.data_path, is_train)

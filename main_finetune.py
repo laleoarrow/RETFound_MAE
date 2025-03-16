@@ -42,7 +42,7 @@ def get_args_parser():
     # Model parameters
     parser.add_argument('--model', default='RETFound_mae', type=str, metavar='MODEL',
                         help='Name of model to train')
-    parser.add_argument('--input_size', default=256, type=int,
+    parser.add_argument('--input_size', default=224, type=int,
                         help='images input size')
     parser.add_argument('--drop_path', type=float, default=0.2, metavar='PCT',
                         help='Drop path rate (default: 0.1)')
@@ -62,9 +62,9 @@ def get_args_parser():
                         help='lower lr bound for cyclic schedulers that hit 0')
     parser.add_argument('--warmup_epochs', type=int, default=10, metavar='N',
                         help='epochs to warmup LR')
-    parser.add_argument('--focal_alpha', default=0.4, type=float, # for focal loss
+    parser.add_argument('--focal_alpha', type=float, default=0.4, # for focal loss
                         help='Alpha parameter for Focal Loss (default: 0.4)')
-    parser.add_argument('--focal_gamma', default=2.0, type=float, # for focal loss
+    parser.add_argument('--focal_gamma', type=float, default=2.0, # for focal loss
                         help='Gamma parameter for Focal Loss (default: 2.0)')
 
     # Augmentation parameters
@@ -101,7 +101,7 @@ def get_args_parser():
 
     # * Finetuning params
     parser.add_argument('--finetune', default='', type=str,
-                        help='finetune from checkpoint')
+                        help='finetune from checkpoint; if end with ".pth", load local file; else, download from HuggingFace')
     parser.add_argument('--task', default='', type=str,
                         help='finetune from checkpoint')
     parser.add_argument('--global_pool', action='store_true')
@@ -112,7 +112,7 @@ def get_args_parser():
     # Dataset parameters
     parser.add_argument('--data_path', default='./data/', type=str,
                         help='dataset path')
-    parser.add_argument('--nb_classes', default=8, type=int,
+    parser.add_argument('--nb_classes', default=2, type=int,
                         help='number of the classification types')
     parser.add_argument('--output_dir', default='./output_dir',
                         help='path where to save, empty for no saving')
@@ -162,7 +162,7 @@ def main(args, criterion=None): # add 'None' for we have changed criterion in th
 
     misc.init_distributed_mode(args)
 
-    print('job dir: {}'.format(os.path.dirname(os.path.realpath(__file__))))
+    print('job dir: {}'.format(os.path.dirname(os.path.realpath(__file__)))) # 工作路径
     print("{}".format(args).replace(', ', ',\n'))
 
     device = torch.device(args.device)
@@ -188,17 +188,18 @@ def main(args, criterion=None): # add 'None' for we have changed criterion in th
             args=args,
         )
     
-    if args.finetune and not args.eval:
-        
-        print(f"Downloading pre-trained weights from: {args.finetune}")
-        
-        checkpoint_path = hf_hub_download(
-            repo_id=f'YukunZhou/{args.finetune}',
-            filename=f'{args.finetune}.pth',
-        )
-        print("Downloaded weights to: %s" % checkpoint_path)
-
-        checkpoint = torch.load(checkpoint_path, map_location='cpu')
+    if args.finetune and not args.eval: # add founction to load pre-downloaded weights
+        if args.finetune.endswith('.pth'):
+            print(f"Loading pre-trained weights from local file: {args.finetune}")
+            checkpoint = torch.load(args.finetune, map_location='cpu')
+        else:
+            print(f"Downloading pre-trained weights from: {args.finetune}")
+            checkpoint_path = hf_hub_download(
+                repo_id=f'YukunZhou/{args.finetune}',
+                filename=f'{args.finetune}.pth',
+            )
+            print("Downloaded weights to: %s" % checkpoint_path)
+            checkpoint = torch.load(checkpoint_path, map_location='cpu')
         print("Load pre-trained checkpoint from: %s" % args.finetune)
         
         if args.model!='RETFound_mae':
@@ -248,12 +249,12 @@ def main(args, criterion=None): # add 'None' for we have changed criterion in th
     # write out as records
     if args.output_dir:
         os.makedirs(args.output_dir, exist_ok=True)
-        output_path = os.path.join(args.output_dir, 'class_info.txt')
-        with open(output_path, 'w', encoding='utf-8') as f:
+        class_info_output_path = os.path.join(args.output_dir, 'class_info.txt')
+        with open(class_info_output_path, 'w', encoding='utf-8') as f:
             f.write("Combined class info:\n")
             for cls, idx in mapping.items():
                 f.write(f"Class '{cls}': index = {idx}, count = {counts[cls]}, weight = {cw[idx]:.4f}\n")
-    print(f"Class info has been saved to: {output_path}")
+    print(f"Class info has been saved to: {class_info_output_path}")
     # >>> apply criterion with class weight, possibly use WeightedFocalLoss for imbalanced data
     # criterion = torch.nn.CrossEntropyLoss(weight=cw)
     criterion = WeightedFocalLoss(
@@ -332,6 +333,7 @@ def main(args, criterion=None): # add 'None' for we have changed criterion in th
         pin_memory=args.pin_mem,
         drop_last=False
     )
+    all_indices = list(data_loader_test.sampler) 
 
     mixup_fn = None
     mixup_active = args.mixup > 0 or args.cutmix > 0. or args.cutmix_minmax is not None
@@ -384,7 +386,7 @@ def main(args, criterion=None): # add 'None' for we have changed criterion in th
         if 'epoch' in checkpoint:
             print("Test with the best model at epoch = %d" % checkpoint['epoch'])
         test_stats, auc_roc = evaluate(data_loader_test, model, device, args, epoch=0, mode='test',
-                                       num_class=args.nb_classes, log_writer=log_writer)
+                                       num_class=args.nb_classes, log_writer=log_writer, criterion = criterion)
         exit(0)
 
     print(f"Start training for {args.epochs} epochs")
@@ -404,7 +406,7 @@ def main(args, criterion=None): # add 'None' for we have changed criterion in th
         )
 
         val_stats, val_score = evaluate(data_loader_val, model, device, args, epoch, mode='val',
-                                        num_class=args.nb_classes, log_writer=log_writer)
+                                        num_class=args.nb_classes, log_writer=log_writer, criterion = criterion)
         if max_score < val_score:
             max_score = val_score
             best_epoch = epoch
