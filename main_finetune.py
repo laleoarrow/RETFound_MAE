@@ -347,7 +347,7 @@ def main(args, criterion=None): # add 'None' for we have changed criterion in th
     if args.resume and args.eval:
         checkpoint = torch.load(args.resume, map_location='cpu')
         print("Load checkpoint from: %s" % args.resume)
-        model.load_state_dict(checkpoint['model'])
+        model.load_state_dict(checkpoint['model'], strict=False)
 
     model.to(device)
     model_without_ddp = model
@@ -385,8 +385,8 @@ def main(args, criterion=None): # add 'None' for we have changed criterion in th
     if args.eval:
         if 'epoch' in checkpoint:
             print("Test with the best model at epoch = %d" % checkpoint['epoch'])
-        test_stats, auc_roc = evaluate(data_loader_test, model, device, args, epoch=0, mode='test',
-                                       num_class=args.nb_classes, log_writer=log_writer, criterion = criterion)
+        test_stats, auc_roc = evaluate(data_loader_test, model, device, args, epoch=-1, mode='test',
+                                       num_class=args.nb_classes, log_writer=None, criterion = criterion)
         exit(0)
 
     print(f"Start training for {args.epochs} epochs")
@@ -423,7 +423,7 @@ def main(args, criterion=None): # add 'None' for we have changed criterion in th
             model.to(device)
             print("Test with the best model, epoch = %d:" % checkpoint['epoch'])
             test_stats, auc_roc = evaluate(data_loader_test, model, device, args, -1, mode='test',
-                                           num_class=args.nb_classes, log_writer=None)
+                                           num_class=args.nb_classes, log_writer=None, criterion = criterion)
 
         if log_writer is not None:
             log_writer.add_scalar('loss/val', val_stats['loss'], epoch)
