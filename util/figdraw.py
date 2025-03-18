@@ -76,7 +76,7 @@ def plot_confusion_matrix(true_labels, pred_labels, class_names=None, output_dir
         
         if is_norm:
             cm_plot = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-            fmt = '.2f'
+            fmt = '.5f'
             vmax = cm_plot.max()
             title_suffix = "Probability"
             file_suffix = "prob"

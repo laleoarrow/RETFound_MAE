@@ -30,6 +30,20 @@ from util.WeightedFocalLoss import WeightedFocalLoss       # added focalloss for
 faulthandler.enable()
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
+# debugging using hash for model
+import hashlib
+import io
+def get_model_hash(model):
+    # 将模型权重转换为字节流
+    model_state = model.state_dict()
+    buffer = io.BytesIO()
+    torch.save(model_state, buffer)
+    byte_data = buffer.getvalue()
+    
+    # 计算 MD5 哈希值
+    md5_hash = hashlib.md5(byte_data).hexdigest()
+    return md5_hash
+
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE fine-tuning for image classification', add_help=False)
@@ -385,6 +399,7 @@ def main(args, criterion=None): # add 'None' for we have changed criterion in th
     if args.eval:
         if 'epoch' in checkpoint:
             print("Test with the best model at epoch = %d" % checkpoint['epoch'])
+        print("Model hash:", get_model_hash(model))
         test_stats, auc_roc = evaluate(data_loader_test, model, device, args, epoch=-1, mode='test',
                                        num_class=args.nb_classes, log_writer=None, criterion = criterion)
         exit(0)
@@ -404,12 +419,17 @@ def main(args, criterion=None): # add 'None' for we have changed criterion in th
             log_writer=log_writer,
             args=args
         )
+        print("Model hash:", get_model_hash(model), "for epoch <", epoch, ">")
 
         val_stats, val_score = evaluate(data_loader_val, model, device, args, epoch, mode='val',
                                         num_class=args.nb_classes, log_writer=log_writer, criterion = criterion)
         if max_score < val_score:
             max_score = val_score
             best_epoch = epoch
+
+            # debuging
+            print("Model hash:", get_model_hash(model))
+
             if args.output_dir and args.savemodel:
                 misc.save_model(
                     args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
@@ -418,12 +438,21 @@ def main(args, criterion=None): # add 'None' for we have changed criterion in th
 
 
         if epoch == (args.epochs - 1):
+            # 先把最后一次保存下来
+            misc.save_model(
+                args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+                loss_scaler=loss_scaler, epoch=epoch, mode='last'
+            )
+            # 再评估best
             checkpoint = torch.load(os.path.join(args.output_dir, args.task, 'checkpoint-best.pth'), map_location='cpu')
-            model.load_state_dict(checkpoint['model'], strict=False)
-            model.to(device)
+            model_without_ddp.load_state_dict(checkpoint['model'], strict=True)
+            model_without_ddp.to(device)
             print("Test with the best model, epoch = %d:" % checkpoint['epoch'])
-            test_stats, auc_roc = evaluate(data_loader_test, model, device, args, -1, mode='test',
+            # debuging
+            print("Model hash:", get_model_hash(model_without_ddp))
+            test_stats, auc_roc = evaluate(data_loader_test, model_without_ddp, device, args, -1, mode='test',
                                            num_class=args.nb_classes, log_writer=None, criterion = criterion)
+            
 
         if log_writer is not None:
             log_writer.add_scalar('loss/val', val_stats['loss'], epoch)
