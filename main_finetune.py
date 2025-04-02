@@ -26,6 +26,8 @@ import warnings
 import faulthandler
 
 from util.WeightedFocalLoss import WeightedFocalLoss       # added focalloss for criterion 
+import torchvision
+import torch.nn as nn
 
 faulthandler.enable()
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -195,6 +197,15 @@ def main(args, criterion=None): # add 'None' for we have changed criterion in th
         drop_path_rate=args.drop_path,
         global_pool=args.global_pool,
     )
+    elif args.model=='resnet50':
+        # ResNet50 with custom head
+        model = torchvision.models.resnet50(pretrained=False)
+        model.fc = nn.Sequential(
+            nn.Linear(2048, 496),
+            nn.ReLU(inplace=True),
+            nn.Dropout(p=0.5),
+            nn.Linear(496, args.nb_classes)
+        )
     else:
         model = models.__dict__[args.model](
             num_classes=args.nb_classes,
@@ -216,7 +227,7 @@ def main(args, criterion=None): # add 'None' for we have changed criterion in th
             checkpoint = torch.load(checkpoint_path, map_location='cpu')
         print("Load pre-trained checkpoint from: %s" % args.finetune)
         
-        if args.model!='RETFound_mae':
+        if args.model=='RETFound_dinov2':
             checkpoint_model = checkpoint['teacher']
         else:
             checkpoint_model = checkpoint['model']
